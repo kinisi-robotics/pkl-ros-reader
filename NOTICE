@@ -1,0 +1,25 @@
+pkl-ros-reader
+Copyright (c) 2025 Joshua Smith and Kinisi Robotics
+
+This software includes the following third-party dependencies:
+
+---
+
+github.com/apple/pkl-go v0.9.0
+Licensed under the Apache License, Version 2.0
+Copyright (c) Apple Inc. and the pkl-go project authors
+https://github.com/apple/pkl-go/blob/main/LICENSE.txt
+
+---
+
+github.com/vmihailenco/msgpack/v5 v5.4.1
+Licensed under the BSD 2-Clause License
+Copyright (c) Vladimir Mihailenco
+https://github.com/vmihailenco/msgpack/blob/v5/LICENSE
+
+---
+
+github.com/vmihailenco/tagparser/v2 v2.0.0
+Licensed under the BSD 2-Clause License
+Copyright (c) Vladimir Mihailenco
+https://github.com/vmihailenco/tagparser/blob/master/LICENSE
