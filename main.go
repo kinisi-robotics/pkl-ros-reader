@@ -14,7 +14,8 @@ import (
 
 func main() {
 	client, err := pkl.NewExternalReaderClient(
-		pkl.WithExternalClientModuleReader(&rospkgModuleReader{}),
+		pkl.WithExternalClientModuleReader(&rospkgModuleReader{res: defaultResolver}),
+		pkl.WithExternalClientResourceReader(&rospkgResourceReader{res: defaultResolver}),
 	)
 	if err != nil {
 		log.Fatalln(err)
@@ -24,7 +25,11 @@ func main() {
 	}
 }
 
-type rospkgModuleReader struct{}
+// ── Module reader ─────────────────────────────────────────────────────────────
+
+type rospkgModuleReader struct {
+	res resolver
+}
 
 var _ pkl.ModuleReader = &rospkgModuleReader{}
 
@@ -53,7 +58,7 @@ func (r *rospkgModuleReader) ListElements(baseURI url.URL) ([]pkl.PathElement, e
 	return nil, nil
 }
 
-// Read resolves a rospkg: URI to a ROS package file
+// Read resolves a rospkg: URI to a ROS package file and returns its string contents.
 //
 // URI format:
 //
@@ -69,7 +74,87 @@ func (r *rospkgModuleReader) ListElements(baseURI url.URL) ([]pkl.PathElement, e
 //	-> <git_root>/ros/my_package/config/my_config.pkl (source)
 //	-> $(ros2 pkg prefix my_package)/share/my_package/config/my_config.pkl (installed)
 func (r *rospkgModuleReader) Read(uri url.URL) (string, error) {
-	// For hierarchical URIs: rospkg:///package_name/path/to/file.pkl
+	path, err := r.res.resolve(uri)
+	if err != nil {
+		return "", err
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(contents), nil
+}
+
+// ── Resource reader ───────────────────────────────────────────────────────────
+
+type rospkgResourceReader struct {
+	res resolver
+}
+
+var _ pkl.ResourceReader = &rospkgResourceReader{}
+
+// Scheme returns "rospkg" - the URI scheme this reader handles
+func (r *rospkgResourceReader) Scheme() string {
+	return "rospkg"
+}
+
+// HasHierarchicalUris returns true - rospkg: URIs support hierarchy
+func (r *rospkgResourceReader) HasHierarchicalUris() bool {
+	return true
+}
+
+// IsGlobbable returns false - we don't support glob reads
+func (r *rospkgResourceReader) IsGlobbable() bool {
+	return false
+}
+
+// ListElements is not implemented (globbing not supported)
+func (r *rospkgResourceReader) ListElements(baseURI url.URL) ([]pkl.PathElement, error) {
+	return nil, nil
+}
+
+// Read resolves a rospkg: URI to a ROS package file and returns its raw byte contents.
+//
+// This enables reading arbitrary files (YAML, JSON, binary, etc.) via Pkl's read() expression:
+//
+//	read("rospkg:///my_package/config/params.yaml")
+//
+// Resolution follows the same order as the module reader:
+//  1. Source directory via git repo root: <git_root>/ros/package_name/path/to/file
+//  2. ROS package discovery via `ros2 pkg prefix <package_name>`
+func (r *rospkgResourceReader) Read(uri url.URL) ([]byte, error) {
+	path, err := r.res.resolve(uri)
+	if err != nil {
+		return nil, err
+	}
+	return os.ReadFile(path)
+}
+
+// ── Shared resolution logic ───────────────────────────────────────────────────
+
+// resolver holds the external-command dependencies used during URI resolution.
+// The function fields are swapped out in tests to avoid spawning real git/ros2 processes.
+type resolver struct {
+	// gitRoot returns the root of the current git repository, or "" if not in one.
+	gitRoot func() string
+	// rosPackage returns the full path to relPath inside the installed ROS package
+	// packageName, or "" if the package/file cannot be found.
+	rosPackage func(packageName, relPath string) string
+}
+
+// defaultResolver uses the real git and ros2 binaries.
+var defaultResolver = resolver{
+	gitRoot:    findGitRoot,
+	rosPackage: findROSPackage,
+}
+
+// resolve maps a rospkg:/// URI to a local filesystem path.
+//
+// Resolution order:
+//  1. Source directory via git repo root: <git_root>/ros/package_name/path/to/file
+//  2. ROS package discovery via `ros2 pkg prefix <package_name>`
+func (r resolver) resolve(uri url.URL) (string, error) {
+	// For hierarchical URIs: rospkg:///package_name/path/to/file
 	// The path is in uri.Path (starts with /)
 	relativePath := uri.Path
 	if len(relativePath) > 0 && relativePath[0] == '/' {
@@ -94,18 +179,16 @@ func (r *rospkgModuleReader) Read(uri url.URL) (string, error) {
 	}
 
 	// Try source directory via git repo root
-	if repoRoot := findGitRoot(); repoRoot != "" {
+	if repoRoot := r.gitRoot(); repoRoot != "" {
 		sourcePath := filepath.Join(repoRoot, "ros", relativePath)
-		if contents, err := os.ReadFile(sourcePath); err == nil {
-			return string(contents), nil
+		if _, err := os.Stat(sourcePath); err == nil {
+			return sourcePath, nil
 		}
 	}
 
 	// Try ROS package discovery via `ros2 pkg prefix`
-	if packagePath := findROSPackage(packageName, packageRelPath); packagePath != "" {
-		if contents, err := os.ReadFile(packagePath); err == nil {
-			return string(contents), nil
-		}
+	if packagePath := r.rosPackage(packageName, packageRelPath); packagePath != "" {
+		return packagePath, nil
 	}
 
 	return "", fmt.Errorf("read %s: could not resolve rospkg:///%s (tried git root source and ros2 pkg prefix)", relativePath, relativePath)

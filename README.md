@@ -8,27 +8,33 @@ This is a Go-based external reader for the PKL configuration language that resol
 
 ## Usage
 
-Register the reader with PKL using the `--external-module-reader` flag to resolve `rospkg:///` URIs in your PKL configuration files.
+Register the reader with PKL using the `--external-module-reader` and `--external-resource-reader` flags to resolve `rospkg:///` URIs in your PKL configuration files.
 
 ### URI Format
 
 ```pkl
-// Generic ROS package format (supports relative imports)
+// Module import — PKL source files (.pkl)
 amends "rospkg:///package_name/path/to/file.pkl"
+
+// Resource read — arbitrary files (YAML, JSON, binary, etc.)
+local myYaml = read("rospkg:///package_name/config/params.yaml")
 ```
 
 The `rospkg:///` scheme maps to ROS package locations using this resolution order:
-1. Source directory: `ros/package_name/path/to/file.pkl`
-2. Install directory: `$(ros2 pkg prefix package_name)/share/package_name/path/to/file.pkl`
+1. Source directory: `ros/package_name/path/to/file`
+2. Install directory: `$(ros2 pkg prefix package_name)/share/package_name/path/to/file`
 
 ### Examples
 
 ```pkl
-// Reference a ROS package config file
+// Amend a base config from another ROS package
 amends "rospkg:///my_package/config/my_config.pkl"
 
-// Reference a nested config file
+// Amend a nested config file
 amends "rospkg:///my_package/config/system/system_default.pkl"
+
+// Read a YAML file as a resource
+local params = read("rospkg:///my_package/config/params.yaml")
 ```
 
 ## Installation
@@ -56,23 +62,34 @@ go build -o pkl-ros-reader .
 
 ## Implementation Details
 
+The binary registers two readers under the `rospkg` scheme:
+
+| Reader | Interface | Return type | Pkl usage |
+|---|---|---|---|
+| Module reader | `ModuleReader` | `string` | `import` / `amends` |
+| Resource reader | `ResourceReader` | `[]byte` | `read()` expression |
+
+Both share the same URI resolution logic:
+1. Parse `rospkg:///package_name/path/to/file` to extract package name and relative path
+2. Check source directory first: `${workspace}/ros/package_name/path/to/file`
+3. If not found, use `ros2 pkg prefix` to locate the installed package
+4. Read and return the file contents
+
+Common reader properties:
 - **Scheme**: `rospkg`
 - **Hierarchical URIs**: Yes (supports relative imports)
 - **Globbable**: No
-- **Local**: Yes (reads from local filesystem and installed packages)
-
-The reader resolves URIs by:
-1. Parsing `rospkg:///package_name/path/to/file.pkl` to extract package name and relative path
-2. Checking source directory first: `${workspace}/ros/package_name/path/to/file.pkl`
-3. If not found, using `ros2 pkg prefix` to locate installed package
-4. Reading and returning the file contents as a string
+- **Local** (module reader only): Yes
 
 ## Integration
 
-The reader is registered with PKL via the `--external-module-reader` flag:
+The reader is registered with PKL via the `--external-module-reader` and `--external-resource-reader` flags. Since a single binary handles both, it is registered twice under the same scheme:
 
 ```bash
-pkl eval --external-module-reader rospkg=/path/to/pkl-ros-reader config.pkl
+pkl eval \
+  --external-module-reader rospkg=/path/to/pkl-ros-reader \
+  --external-resource-reader rospkg=/path/to/pkl-ros-reader \
+  config.pkl
 ```
 
 ## License
