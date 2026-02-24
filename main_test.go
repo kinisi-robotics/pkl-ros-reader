@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -274,12 +275,11 @@ func TestModuleReader_ListElements_ReturnsEmpty(t *testing.T) {
 	}
 }
 
-func TestModuleReader_Read_ReturnsStringContents(t *testing.T) {
+func TestModuleReader_Read_ReturnsAmendsDirective(t *testing.T) {
 	tmpDir := t.TempDir()
-	wantContent := "module MyModule {}\n"
 	mustWriteFile(t,
 		filepath.Join(tmpDir, "ros", "my_package", "config", "module.pkl"),
-		[]byte(wantContent),
+		[]byte("module MyModule {}\n"),
 	)
 
 	r := &rospkgModuleReader{res: fakeResolver(tmpDir)}
@@ -289,8 +289,11 @@ func TestModuleReader_Read_ReturnsStringContents(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read() error: %v", err)
 	}
-	if got != wantContent {
-		t.Errorf("Read() = %q, want %q", got, wantContent)
+	absPath := filepath.Join(tmpDir, "ros", "my_package", "config", "module.pkl")
+	wantURI := (&url.URL{Scheme: "file", Path: filepath.ToSlash(absPath)}).String()
+	want := fmt.Sprintf("amends %q\n", wantURI)
+	if got != want {
+		t.Errorf("Read() = %q, want %q", got, want)
 	}
 }
 
@@ -323,10 +326,9 @@ func TestModuleReader_Read_ReadFileError(t *testing.T) {
 
 func TestModuleReader_Read_NestedPath(t *testing.T) {
 	tmpDir := t.TempDir()
-	wantContent := "amends \"../base.pkl\"\n"
 	mustWriteFile(t,
 		filepath.Join(tmpDir, "ros", "my_package", "config", "system", "override.pkl"),
-		[]byte(wantContent),
+		[]byte("amends \"../base.pkl\"\n"),
 	)
 
 	r := &rospkgModuleReader{res: fakeResolver(tmpDir)}
@@ -336,8 +338,11 @@ func TestModuleReader_Read_NestedPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Read() error: %v", err)
 	}
-	if got != wantContent {
-		t.Errorf("Read() = %q, want %q", got, wantContent)
+	absPath := filepath.Join(tmpDir, "ros", "my_package", "config", "system", "override.pkl")
+	wantURI := (&url.URL{Scheme: "file", Path: filepath.ToSlash(absPath)}).String()
+	want := fmt.Sprintf("amends %q\n", wantURI)
+	if got != want {
+		t.Errorf("Read() = %q, want %q", got, want)
 	}
 }
 

@@ -58,7 +58,15 @@ func (r *rospkgModuleReader) ListElements(baseURI url.URL) ([]pkl.PathElement, e
 	return nil, nil
 }
 
-// Read resolves a rospkg: URI to a ROS package file and returns its string contents.
+// Read resolves a rospkg: URI to a ROS package file and returns a Pkl amends
+// directive pointing to the canonical file:// URI.
+//
+// This indirection is essential: Pkl uses a module's URI as its type identity.
+// Without it, importing the same physical file via both file:///… (e.g. through
+// a relative import) and rospkg:///… produces two distinct module identities
+// whose types are incompatible.  By returning `amends "file:///…"`, every
+// rospkg:// import delegates to the file:// module, giving all types a single
+// canonical home.
 //
 // URI format:
 //
@@ -78,11 +86,18 @@ func (r *rospkgModuleReader) Read(uri url.URL) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	contents, err := os.ReadFile(path)
+	absPath, err := filepath.Abs(path)
 	if err != nil {
 		return "", err
 	}
-	return string(contents), nil
+	if info, err := os.Stat(absPath); err == nil && info.IsDir() {
+		return "", fmt.Errorf("read %s: resolved path is a directory, not a file: %s", uri.String(), absPath)
+	}
+	fileURI := (&url.URL{
+		Scheme: "file",
+		Path:   filepath.ToSlash(absPath),
+	}).String()
+	return fmt.Sprintf("amends %q\n", fileURI), nil
 }
 
 // ── Resource reader ───────────────────────────────────────────────────────────
